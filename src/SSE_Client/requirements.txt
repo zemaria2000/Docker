@@ -1,0 +1,4 @@
+influxdb_client==1.36.0
+requests==2.26.0
+six==1.16.0
+toml==0.10.2
