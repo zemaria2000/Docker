@@ -1,0 +1,55 @@
+version: '3'
+
+services:
+
+  model_training:
+    image: model_training:1.1
+    build: ./BuildingModels
+    restart: on-failure
+    env_file:
+     - influx_variables.env
+     - settings.env
+    volumes:
+      - ./BuildingModels:/app
+      - SharedFolder:/app/Models
+
+  assistant:
+    image: assistant:1.1
+    build: ./Assistant
+    restart: on-failure
+    env_file:
+     - influx_variables.env
+     - settings.env
+    volumes:
+      - ./Assistant:/app
+      - SharedFolder:/app/Models
+
+  sse:
+    image: sse:1.1
+    build: ./SSE_Client
+    restart: on-failure
+    env_file:
+     - influx_variables.env    
+     - settings.env
+    volumes:
+      - ./SSE_Client:/app
+
+  update_datasets:
+    image: update_datasets:1.1
+    build: ./UpdateTrainingData
+    restart: on-failure
+    env_file:
+     - influx_variables.env    
+     - settings.env
+    volumes:
+      - ./UpdateTrainingData:/app
+
+
+volumes:
+  SharedFolder:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind 
+      device: ./BuildingModels/Models
+
