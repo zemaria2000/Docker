@@ -91,7 +91,6 @@ def get_data():
 
         print(f'New data for variable {var} successfully loaded! In total, there were {len(df)} measurements loaded! \n')
 
-
 schedule.every().monday.at("01:50").do(get_data)
 
 
@@ -99,6 +98,5 @@ while True:
 
     schedule.run_pending()
 
-    print(f"Waiting for Monday, at 1:50 A.M., to load last week's data to the Datasets folder \n")
-    
+    print('Currently waiting for 1.50 A.M., monday, to retrieve new data')
     time.sleep(1)
