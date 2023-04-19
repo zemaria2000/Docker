@@ -1,0 +1,1 @@
+Já coloquei uma variável que vai buscar os buckets todos, mas há ainda assim os warnings que têm que ser adaptados para o bucket que está no servidor (não me lembro do nome...)
