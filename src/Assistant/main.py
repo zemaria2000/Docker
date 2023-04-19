@@ -15,9 +15,8 @@ import json
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------
-# 1. SETTING SOME FIXED VARIABLES FROM THE DATABASE
+# 1. SETTING SOME FIXED VARIABLES 
 
-# When using the docker container
 # Database variables
 db_url = os.getenv("INFLUXDB_URL")
 db_org = os.getenv("DOCKER_INFLUXDB_INIT_ORG")
@@ -43,6 +42,11 @@ AD_THRESHOLD = float(os.getenv("AD_THRESHOLD"))
 
 # getting the list of equipments that are sending data
 EQUIPMENTS = {"Compressor"}
+
+# Variables to be used in the queries
+time_range = int(INJECT_TIME_INTERVAL*PREVIOUS_STEPS + INJECT_TIME_INTERVAL)
+ad_time_range = int(2*INJECT_TIME_INTERVAL)
+
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -81,9 +85,6 @@ def model_loading():
     except:
         print(f'\n There was a problem loading the models from the {MODEL_DIR} directory... \n\n')
 
-    
-
-
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------
 # 3. STARTING OUR EMAIL ASSISTANT OBJECT
@@ -96,6 +97,7 @@ email_assistant = Email_Intelligent_Assistant(EMAIL_ADDRESS=EMAIL_ADDRESS, EMAIL
 def predictions():
 
     try: 
+
         for equip in EQUIPMENTS:
             
             # -----------------------------------------------------------------------------
@@ -103,7 +105,7 @@ def predictions():
             # influxDB documentation - https://docs.influxdata.com/influxdb/cloud/api-guide/client-libraries/python/
             # query to retrieve the data from the bucket relative to all the variables
             query = f'from(bucket:"{str(db_bucket)}")\
-                |> range(start: -1h)\
+                |> range(start: -{time_range}s)\
                 |> sort(columns: ["_time"], desc: true)\
                 |> limit(n: {PREVIOUS_STEPS})\
                 |> filter(fn:(r) => r.DataType == "Real Data")\
@@ -117,60 +119,69 @@ def predictions():
                 for record in table.records:
                     results.append((record.get_measurement(), record.get_value(), record.get_time()))
 
-            # Getting the variables of each equipment
-            diff_variables = list()
-            for i in range(len(results)):
-                if results[i][0] not in diff_variables:
-                    diff_variables.append(results[i][0])
-        
 
-            # Seperating each variable values - putting them in the dictionary "variable_vals"
-            norm_variable_vals = dict()
-            aux = list()
-            for var in diff_variables:
+            # IF WE HAVE AN APPROPRIATE NUMBER OF CONSECUTIVE MEASUREMENTS TO MAKE PREDICTIONS
+            if int(len(results)/len(VARIABLES)) == PREVIOUS_STEPS:
+                
+                # Getting the variables of each equipment
+                diff_variables = list()
                 for i in range(len(results)):
-                    if results[i][0] == var:
-                        aux.append(results[i][1])
-                norm_variable_vals[f'{var}'] = globals()[f'scaler_{var}'].fit_transform(np.array(aux).reshape(-1, 1))
-                aux = list()
-
-            # Making the predictions
-            for var in diff_variables:
-
-                # Reverse the vector so that the last measurement is the last timestamp
-                values = np.flip(norm_variable_vals[f'{var}'])
-
-                # Turning them into a numpy array, and reshaping so that it has the shape that we used to build the model
-                array = np.array(values).reshape(1, PREVIOUS_STEPS)      
-
-                # Making a prediction based on the values that were retrieved
-                test_predict = globals()[f'model_{var}'].predict(array)
-
-                # Retrieving the y prediction
-                if var not in LIN_REG_VARS:
-                    test_predict_y = test_predict[0][PREVIOUS_STEPS - 1]
-                else:
-                    test_predict_y = test_predict
-
-                # Putting our value back on it's unnormalized form
-                test_predict_y = globals()[f'scaler_{var}'].inverse_transform(np.array(test_predict_y).reshape(-1, 1))
+                    if results[i][0] not in diff_variables:
+                        diff_variables.append(results[i][0])
             
+
+                # Seperating each variable values - putting them in the dictionary "variable_vals"
+                norm_variable_vals = dict()
+                aux = list()
+                for var in diff_variables:
+                    for i in range(len(results)):
+                        if results[i][0] == var:
+                            aux.append(results[i][1])
+                    norm_variable_vals[f'{var}'] = globals()[f'scaler_{var}'].fit_transform(np.array(aux).reshape(-1, 1))
+                    aux = list()
+
                 # Getting the future timestamp
                 actual_ts = results[0][2]
                 future_ts = actual_ts + timedelta(seconds = INJECT_TIME_INTERVAL)
 
-                # Sending the current prediction to a bucket 
-                msg = influxdb_client.Point(var) \
-                    .tag("DataType", "Prediction Data") \
-                    .tag("Equipment", equip) \
-                    .field("value", float(test_predict_y)) \
-                    .time(future_ts, influxdb_client.WritePrecision.NS)
-                write_api.write(bucket = str(db_bucket), record = msg)
+                # Making the predictions
+                for var in diff_variables:
 
-            print(f'Predictions of equipment {equip} successfully sent to the database... Waiting {INJECT_TIME_INTERVAL} secs for the AD and next predictions \n')
+                    # Reverse the vector so that the last measurement is the last timestamp
+                    values = np.flip(norm_variable_vals[f'{var}'])
+
+                    # Turning them into a numpy array, and reshaping so that it has the shape that we used to build the model
+                    array = np.array(values).reshape(1, PREVIOUS_STEPS)      
+
+                    # Making a prediction based on the values that were retrieved
+                    test_predict = globals()[f'model_{var}'].predict(array)
+
+                    # Retrieving the y prediction
+                    if var not in LIN_REG_VARS:
+                        test_predict_y = test_predict[0][PREVIOUS_STEPS - 1]
+                    else:
+                        test_predict_y = test_predict
+
+                    # Putting our value back on it's unnormalized form
+                    test_predict_y = globals()[f'scaler_{var}'].inverse_transform(np.array(test_predict_y).reshape(-1, 1))
+
+                    # Sending the current prediction to a bucket 
+                    msg = influxdb_client.Point(var) \
+                        .tag("DataType", "Prediction Data") \
+                        .tag("Equipment", equip) \
+                        .field("value", float(test_predict_y)) \
+                        .time(future_ts, influxdb_client.WritePrecision.NS)
+                    write_api.write(bucket = str(db_bucket), record = msg)
+
+                print(f'Predictions of equipment {equip} successfully sent to the database... Waiting {INJECT_TIME_INTERVAL} secs for the AD and next predictions \n')
+
+            # IN CASE WE DON'T HAVE THE RIGHT AMOUNT OF MEASUREMENTS 
+            elif(int(len(results)/len(VARIABLES)) < PREVIOUS_STEPS):
+                print(f"Cannot do predictions for equipment {equip}, as there aren't enough consecutive measurements in the database")
+                print(f"We need at least {PREVIOUS_STEPS} measurements, and we only have {int(len(results)/len(VARIABLES))} \n\n")
 
     except:
-        print('\n Something went wrong while trying to make the predictions and sending them to the DB...\n')
+        print('\n Something went completely wrong with the predictions \n')
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------
 # 5. DEFINING THE ANOMALY DETECTION FUNCTION
@@ -178,6 +189,7 @@ def predictions():
 def anomaly_detection():
 
     try:
+
         for equip in EQUIPMENTS:
 
             # Creating some empty auxiliary dictionaries
@@ -185,7 +197,7 @@ def anomaly_detection():
 
             # Query to retrieve the last forecasted value
             query_pred = f'from(bucket:"{str(db_bucket)}")\
-                |> range(start: -1h)\
+                |> range(start: -{ad_time_range}s)\
                 |> last()\
                 |> filter(fn:(r) => r.DataType == "Prediction Data")\
                 |> filter(fn:(r) => r.Equipment == "{equip}")\
@@ -193,7 +205,7 @@ def anomaly_detection():
 
             # Query to retrieve the last actual value
             query_last = f'from(bucket:"{str(db_bucket)}")\
-                |> range(start: -1h)\
+                |> range(start: -{ad_time_range}s)\
                 |> last()\
                 |> filter(fn:(r) => r.DataType == "Real Data")\
                 |> filter(fn:(r) => r.Equipment == "{equip}")\
@@ -212,108 +224,78 @@ def anomaly_detection():
                 for record in table.records:
                     results_last.append((record.get_measurement(), record.get_value(), record.get_time()))
 
-            # Getting the variables of each equipment
-            diff_variables = list()
-            for i in range(len(results_last)):
-                if results_last[i][0] not in diff_variables:
-                    diff_variables.append(results_last[i][0])
 
-            # Getting the timestamp of the values (to then put in the report)
-            ts = list()
-            for i in range(len(results_last)):
-                ts.append(results_last[i][2].strftime("%m/%d/%Y, %H:%M:%S"))
-                
+            # IF WE HAVE A PAIR (MEASUREMENT + PREDICTION) IN THE LAST TIMESTAMP, WE CAN CONTINUE WITH THE ANOMALY DETECTION TASK
+            if len(results_last) > 0 and len(results_pred) > 0:
+                # Getting the variables of each equipment
+                diff_variables = list()
+                for i in range(len(results_last)):
+                    if results_last[i][0] not in diff_variables:
+                        diff_variables.append(results_last[i][0])
 
-            # Normalizing the data received
-            for i in range(len(results_pred)):
-                # Auxiliary variables
-                var = results_pred[i][0]
-                aux1 = results_pred[i][1]
-                aux2 = results_last[i][1]
-                # Getting the non-normalized values of the variables
-                predicted_vals[var] = globals()[f'scaler_{var}'].transform(np.float32(aux1).reshape(-1, 1))
-                real_vals[var] = globals()[f'scaler_{var}'].transform(np.float32(aux2).reshape(-1, 1))
-                # Getting the error of the measurements
-                aux_error = (np.abs(aux1 - aux2))/aux2
-                error[var] = aux_error
-                
-                
-            # -----------------------------------------------------------------------------------------------------------
-            # COMPARING THE TWO RESULTS IN ORDER TO DETECT AN ANOMALY
-            # For this I'll create a pandas DataFrame with some important columns, which can then be more easily used to send the reports, etc
+                # Getting the timestamp of the values (to then put in the report)
+                ts = list()
+                for i in range(len(results_last)):
+                    ts.append(results_last[i][2].strftime("%H:%M:%S - %m/%d/%Y"))
+                    
+                # Storing the values
+                for i in range(len(results_pred)):
+                    var = results_pred[i][0]
+                    predicted_vals[var] = round(results_pred[i][1], 3)
+                    real_vals[var] = round(results_last[i][1], 2)
+                    # getting the error of the measurements
+                    aux_error = (np.abs(predicted_vals[var] - real_vals[var]))/real_vals[var]
+                    error[var] = round(aux_error*100, 2)
+                    
+                    
+                # -----------------------------------------------------------------------------------------------------------
+                # COMPARING THE TWO RESULTS IN ORDER TO DETECT AN ANOMALY
+                # For this I'll create a pandas DataFrame with some important columns, which can then be more easily used to send the reports, etc
 
-            # Sorting the variables alphabetically, as the values come from the database in the alphabetical order of the variables' names
-            variables = list(diff_variables)
-            variables.sort()
+                # Sorting the variables alphabetically, as the values come from the database in the alphabetical order of the variables' names
+                variables = list(diff_variables)
+                variables.sort()
 
-            df = pd.DataFrame(index = diff_variables)
-            df[['Timestamp', 'Predicted Value', 'Real Value', 'Error']] = [ts, predicted_vals.values(), real_vals.values(), error.values()]
+                df = pd.DataFrame(index = diff_variables)
+                df[['Timestamp', 'Predicted Value', 'Real Value', 'Error (%)']] = [ts, predicted_vals.values(), real_vals.values(), error.values()]
 
-            # Setting up an anomaly filter
-            anomaly_filter = (df['Error'] > AD_THRESHOLD)
-            # Getting the anomalies
-            anomaly_df = df.loc[anomaly_filter]
+                # Setting up an anomaly filter
+                anomaly_filter = (df['Error (%)'] > AD_THRESHOLD)
+                # Getting the anomalies
+                anomaly_df = df.loc[anomaly_filter]
 
-            for i in range(len(error)):
-                var = variables[i]
-                # Sending the Error values to the database
-                msg = influxdb_client.Point(var) \
-                    .tag("DataType", "Error") \
-                    .tag("Equipment", equip) \
-                    .field("value", error[var]) \
-                    .time(results_last[0][2], influxdb_client.WritePrecision.NS)
-                write_api.write(bucket = str(db_bucket), record = msg)
+                for i in range(len(error)):
+                    var = variables[i]
+                    # Sending the Error values to the database
+                    msg = influxdb_client.Point(var) \
+                        .tag("DataType", "Error") \
+                        .tag("Equipment", equip) \
+                        .field("value", error[var]) \
+                        .time(results_last[0][2], influxdb_client.WritePrecision.NS)
+                    write_api.write(bucket = str(db_bucket), record = msg)
 
-            # Adding the anomalies to the report
-            email_assistant.add_anomalies(anomaly_dataframe = anomaly_df)
+                # Adding the anomalies to the report
+                email_assistant.add_anomalies(anomaly_dataframe = anomaly_df)
 
-            print('\n The anomaly detection is correctly working. Waiting for the next batch of predictions \n')
+                print('\n The anomaly detection is correctly working. Waiting for the next batch of predictions \n')
+            
+            else:
+                print(f"There's no pair (measurement + prediction) in the last timestamp in order for us to detect anomalies \n\n")
 
     except:
-        print('\n Something went wrong while trying to detect the anomalies \n')
-
-
-
-
-# ---------------------------------------------------------------------------------------------------------------------------------------------
-# ---------------------------------------------------------------------------------------------------------------------------------------------
-# 5. CHECKING IF THERE IS AN APPROPRIATE NUMBER OF VALUES TO MAKE PREDICTIONS
-# First we need to make sure that there are a correct number of measurements to make a prediction
-# We'll query one of the variables and check if there are as many measurements as needed to make a prediction (PREVIOUS_STEPS)
-
-
-results = []
-
-while len(results) < PREVIOUS_STEPS:
-     
-    query = f'from(bucket:"{str(db_bucket)}")\
-        |> range(start: -1h)\
-        |> sort(columns: ["_time"], desc: true)\
-        |> filter(fn:(r) => r.DataType == "Real Data")\
-        |> filter(fn:(r) => r._measurement == "C_phi_L3")'
-
-
-    # Send the query defined above retrieving the needed data from the database
-    result = query_api.query(org = str(db_org), query = query)
-
-    # getting the values (it returns the values in the alphabetical order of the variables)
-    results = []
-    for table in result:
-        for record in table.records:
-            results.append((record.get_measurement(), record.get_value(), record.get_time()))
-
-    print(f'There are {len(results)} measurements, and we need {PREVIOUS_STEPS}.')
-    
-    time.sleep(1)
+        print('\n Something went completely wrong while trying to detect anomalies \n')
 
 
 # -------------------------------------------------------------------------------------------------
 # 6. SCHEDULLING SOME FUNCTIONS TO BE EXECUTED
 # for demonstration purposes, uncomment the minutes ones
+schedule.every(5).minutes.do(email_assistant.send_email_notification)
+schedule.every(5).minutes.do(email_assistant.save_report)
+schedule.every(5).minutes.do(email_assistant.generate_blank_excel)
 schedule.every(10).minutes.do(model_loading)
-schedule.every().hour.do(email_assistant.send_email_notification)
-schedule.every().hour.do(email_assistant.save_report)
-schedule.every().hour.do(email_assistant.generate_blank_excel)
+# schedule.every().hour.do(email_assistant.send_email_notification)
+# schedule.every().hour.do(email_assistant.save_report)
+# schedule.every().hour.do(email_assistant.generate_blank_excel)
 schedule.every(INJECT_TIME_INTERVAL).seconds.do(predictions)
 schedule.every(INJECT_TIME_INTERVAL).seconds.do(anomaly_detection)
 

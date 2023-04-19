@@ -14,11 +14,9 @@ class Email_Intelligent_Assistant:
         
     # Generating a new blank excel
     def generate_blank_excel(self):
-        cols = {'Timestamp': [], 'Predicted Value': [], 'Real Value': [], 'Error': [], 'Notes': []}
+        cols = {'Timestamp': [], 'Predicted Value': [], 'Real Value': [], 'Error (%)': [], 'Notes': []}
         new_file = pd.DataFrame(cols)
         new_file.to_excel('Current_Report.xlsx')
-
-        print('New blank excel successfully generated! \n')
 
     # inputting new anomalies into the report
     def add_anomalies(self, anomaly_dataframe):
@@ -59,14 +57,18 @@ class Email_Intelligent_Assistant:
         number_anomalies = df.shape[0]
         high_anomalies = len(df[df['Notes'] == 'The real value was far to low than the prediction given'])
         low_anomalies = len(df[df['Notes'] == 'The real value was to high when compared with the prediction given'])
+        
         # Writing a text that summarizes the data gathered
-        msg_to_send = f"In total there were {number_anomalies} anomalies detected during the last hour \n{high_anomalies} were values that were far too big when compared to the predictions and {low_anomalies} were values too low compared to the predictions \n\n In terms of the variables that had anomalies, we had: \n"
+        if number_anomalies == 0:
+            msg_to_send = f"There were no anomalies detected during the last hour!"
+        else:
+            msg_to_send = f"In total there were {number_anomalies} anomalies detected during the last hour \n{high_anomalies} were values that were far too big when compared to the predictions and {low_anomalies} were values too low compared to the predictions \n\n In terms of the variables that had anomalies, we had: \n"
 
-        for var in VARIABLES:
-            if var in anomaly_occur:
-                msg_to_send += f'   - {var} with {anomaly_occur[var]} anomalies;\n'
+            for var in VARIABLES:
+                if var in anomaly_occur:
+                    msg_to_send += f'   - {var} with {anomaly_occur[var]} anomalies;\n'
 
-        msg_to_send += '\n\n Attached to this email we have an Excel file with all the anomalies, their respective timestamps and some more useful information'
+            msg_to_send += '\n\n Attached to this email we have an Excel file with all the anomalies, their respective timestamps and some more useful information'
 
         # Instantiating the EmailMessage object
         msg = EmailMessage()
@@ -86,18 +88,17 @@ class Email_Intelligent_Assistant:
         with open('Current_Report.xlsx', 'rb') as file:
             file_data = file.read()
             file_name = "HourlyReport.xlsx"
+            
+        if number_anomalies > 0:
+            # Adding the excel file as an attachment to the email
+            msg.add_attachment(file_data, maintype = 'application', subtype = 'xlsx', filename = file_name)
 
-        # Adding the excel file as an attachment to the email
-        msg.add_attachment(file_data, maintype = 'application', subtype = 'xlsx', filename = file_name)
+        # print('Email successfully sent! \n\n')
 
-        print('Email successfully sent!')
-        print("\n The content of the email is the following:")
-        print(f'\n {msg_to_send} \n\n')
-
-        # # sending the email
-        # with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        #     # login to our email server
-        #     smtp.login(self.EMAIL_ADDRESS, self.EMAIL_PASSWORD)       # Password that is given by google when enabling 2 way authentication 
-        #     # sending the message
-        #     smtp.send_message(msg)
-        #     print('Message sent')
+        # sending the email
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            # login to our email server
+            smtp.login(self.EMAIL_ADDRESS, self.EMAIL_PASSWORD)       # Password that is given by google when enabling 2 way authentication 
+            # sending the message
+            smtp.send_message(msg)
+            print('Message sent')
