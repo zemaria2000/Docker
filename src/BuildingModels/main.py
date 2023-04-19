@@ -1,15 +1,18 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+# from settings import TRAIN_SPLIT, PREVIOUS_STEPS, TRAINING, VARIABLES, LIN_REG_VARS, MODEL_DIR, SCALER_DIR, INFLUXDB, DATA_DIR
 import keras_tuner as kt
 from keras_tuner import HyperParameters as hp
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LinearRegression
 import joblib
 import schedule
+import influxdb_client
 from influxdb_client.client.write_api import ASYNCHRONOUS
 import os
 import time
+import json
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # 1. DEFINING SOME FIXED VARIABLES
@@ -21,7 +24,11 @@ db_org = os.getenv("DOCKER_INFLUXDB_INIT_ORG")
 db_token = os.getenv("DOCKER_INFLUXDB_INIT_ADMIN_TOKEN")
 db_bucket = os.getenv("DOCKER_INFLUXDB_INIT_BUCKET")
 
-# getting the variables
+# # getting the variables
+# VARIABLES = os.getenv("VARIABLES")
+# LIN_REG_VARS = os.getenv("LIN_REG_VARS")
+# VARIABLES = json.loads("VARIABLES")
+# LIN_REG_VARS = json.loads("LIN_REG_VARS")
 VARIABLES = ["P_SUM", "U_L1_N", "I_SUM", "H_TDH_I_L3_N", "F", "ReacEc_L1", "C_phi_L3", "ReacEc_L3", "RealE_SUM", "H_TDH_U_L2_N"]
 LIN_REG_VARS = ["RealE_SUM", "ReacEc_L1", "ReacEc_L3"]
 
@@ -44,6 +51,12 @@ EPOCHS = int(os.getenv("EPOCHS"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE"))
 AUTOML_EPOCHS = int(os.getenv("AUTOML_EPOCHS"))
 AUTOML_TRIALS = int(os.getenv("AUTOML_TRIALS"))
+
+# # To use when testing...
+# db_url = INFLUXDB['URL']
+# db_org = INFLUXDB['Org']
+# db_token = INFLUXDB['Token']
+# db_bucket = INFLUXDB['Bucket']
 
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -146,8 +159,67 @@ def divide_time_series(x, y, prev_steps):
     return np.array(x_values), np.array(y_values)
 
 
+
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------------
-# 4. FUNCTION THAT BUILDS THE MODELS AND STORES THEM
+# 4. FUNCTION THAT WILL RETRIEVE NEW DATA FROM THE DATABASE TO TRAIN THE MODELS
+def get_training_data():
+
+    client = influxdb_client.InfluxDBClient(
+        url = db_url,
+        token = db_token,
+        org = db_org
+    )
+    # Instantiate the write and the query/read client
+    write_api = client.write_api(write_options = ASYNCHRONOUS)
+    query_api = client.query_api()
+
+    # Defining the query to retrieve the data (relative to the last 2 weeks of measurements)
+    query = f'from(bucket:"{str(db_bucket)}")\
+        |> range(start: -2w)\
+        |> filter(fn:(r) => r.DataType == "Real Data")\
+        |> filter(fn:(r) => r._field == "value")'
+
+    result = query_api.query(org = str(db_org), query = query)
+
+    # Getting the values for the variables
+    results = []
+    for table in result:
+        for record in table.records:
+            results.append((record.get_measurement(), record.get_value(), record.get_time()))
+
+
+    # Splitting the values per variable
+    variable_vals = dict()
+    aux = list()
+    for var in VARIABLES:
+        for i in range(len(results)):
+            if results[i][0] == var:
+                aux.append(results[i][1])  # adding the values
+        # Saving the list in the respective variable key
+        variable_vals[f'{var}'] = aux
+        aux = list()
+
+    # Getting the timestamps/dates (they are repeated in the results list, as they are the same for every single one of the variables. We just need to retrieve the timestamps for one of them)
+    ts = list()
+    for i in range(len(variable_vals[f'{var}'])):
+        ts.append(results[i][2].strftime("%m/%d/%Y, %H:%M:%S"))
+
+
+    # Replacing the previous data with the new data retrieved
+    for var in VARIABLES:
+
+        df1 = pd.DataFrame(ts)
+        df2 = pd.DataFrame(variable_vals[f'{var}'])
+        df = pd.concat([df1, df2], axis = 1)
+        df.columns = ['Date', f'{var}']
+        # Saving the csv file
+        df.to_csv(f'{DATA_DIR}{var}.csv')
+        print(f'New {var} data stored')
+
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# 5. FUNCTION THAT BUILDS THE MODELS AND STORES THEM
 # This function will use the parameter_builder one to build the best possible model for each variable
 
 def model_builder():
@@ -165,7 +237,7 @@ def model_builder():
 
         # 5.2. PRE-PROCESS THE DATA
         # Smoothing the data with the aid of Exponential Moving Average
-        df[var_to_predict] = df.loc[:, var_to_predict].ewm(span = 20, adjust = False).mean()
+        df[var_to_predict] = df.loc[:, var_to_predict].ewm(alpha = 0.35, adjust = True).mean()
         # Normalizing the data
         scaler = MinMaxScaler()
         df[var_to_predict] = scaler.fit_transform(np.array(df[var_to_predict]).reshape(-1, 1))
@@ -242,17 +314,16 @@ def model_builder():
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # 6. SCHEDULLING THE FUNCTIONS TO BE RAN PERIODICALLY
 
+# schedule.every().tuesday.at("02:00").do(model_builder)
 schedule.every().monday.at("02:00").do(model_builder)
-
-
 # Just to see if the container is properly working
-model_builder()
+# model_builder()
 
 while True:
 
     schedule.run_pending()
 
-    print(f'Waiting for Monday, 2 A.M., for the moder builder to be ran with new data... \n')
+    print('Model Builder will build the new models at 2 A.M on monday')
 
     time.sleep(1)
 
