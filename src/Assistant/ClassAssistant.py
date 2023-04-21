@@ -93,12 +93,12 @@ class Email_Intelligent_Assistant:
             # Adding the excel file as an attachment to the email
             msg.add_attachment(file_data, maintype = 'application', subtype = 'xlsx', filename = file_name)
 
-        # print('Email successfully sent! \n\n')
+        print('Email successfully sent! \n\n')
 
-        # sending the email
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            # login to our email server
-            smtp.login(self.EMAIL_ADDRESS, self.EMAIL_PASSWORD)       # Password that is given by google when enabling 2 way authentication 
-            # sending the message
-            smtp.send_message(msg)
-            print('Message sent')
+        # # sending the email
+        # with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        #     # login to our email server
+        #     smtp.login(self.EMAIL_ADDRESS, self.EMAIL_PASSWORD)       # Password that is given by google when enabling 2 way authentication 
+        #     # sending the message
+        #     smtp.send_message(msg)
+        #     print('Message sent')

@@ -1,7 +1,7 @@
 import influxdb_client
 from influxdb_client.client.write_api import ASYNCHRONOUS
 # from settings import INFLUXDB, PREVIOUS_STEPS, INJECT_TIME_INTERVAL, VARIABLES, AD_THRESHOLD, LIN_REG_VARS, EQUIPMENTS, MODEL_DIR, SCALER_DIR
-from keras.models import load_model
+
 from datetime import timedelta
 import numpy as np
 import pandas as pd
@@ -12,8 +12,9 @@ import joblib
 import time
 import json
 
-
-
+print('All the other libraries were imported \n')
+from keras.models import load_model
+print('Imported keras \n')
 # ---------------------------------------------------------------------------------------------------------------------------------------------
 # 1. SETTING SOME FIXED VARIABLES 
 
@@ -69,21 +70,29 @@ query_api = client.query_api()
 
 def model_loading():
     
-    try:
-        # Loading all the ML models
-        # (don't know why, but the joblib.load only works for the Linear Regression models...)
-        for var in VARIABLES:
-            if var in LIN_REG_VARS:
-                globals()[f'model_{var}'] = joblib.load(f'{MODEL_DIR}{var}.h5')
-            else:
-                globals()[f'model_{var}'] = load_model(f'{MODEL_DIR}{var}.h5')
-            # loading the scalers with joblib works just fine...
-            globals()[f'scaler_{var}'] = joblib.load(f'{SCALER_DIR}{var}.scale')
+    i = 0
 
-        print('All the models were successfully loaded! \n')
+    while i != 10: 
+
+        try:
+            # Loading all the ML models
+            # (don't know why, but the joblib.load only works for the Linear Regression models...)
+            for var in VARIABLES:
+                if var in LIN_REG_VARS:
+                    globals()[f'model_{var}'] = joblib.load(f'{MODEL_DIR}{var}.h5')
+                else:
+                    globals()[f'model_{var}'] = load_model(f'{MODEL_DIR}{var}.h5')
+                # loading the scalers with joblib works just fine...
+                globals()[f'scaler_{var}'] = joblib.load(f'{SCALER_DIR}{var}.scale')
+                i += 1
+
+            print('All the models were successfully loaded! \n')
     
-    except:
-        print(f'\n There was a problem loading the models from the {MODEL_DIR} directory... \n\n')
+        except:
+            print(f'\n There was a problem loading the models or the scalers from the {MODEL_DIR} or {SCALER_DIR} directories... \n\n')
+            i = 0
+        
+        time.sleep(1)
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -289,13 +298,13 @@ def anomaly_detection():
 # -------------------------------------------------------------------------------------------------
 # 6. SCHEDULLING SOME FUNCTIONS TO BE EXECUTED
 # for demonstration purposes, uncomment the minutes ones
-schedule.every(5).minutes.do(email_assistant.send_email_notification)
-schedule.every(5).minutes.do(email_assistant.save_report)
-schedule.every(5).minutes.do(email_assistant.generate_blank_excel)
+# schedule.every(5).minutes.do(email_assistant.send_email_notification)
+# schedule.every(5).minutes.do(email_assistant.save_report)
+# schedule.every(5).minutes.do(email_assistant.generate_blank_excel)
 schedule.every(10).minutes.do(model_loading)
-# schedule.every().hour.do(email_assistant.send_email_notification)
-# schedule.every().hour.do(email_assistant.save_report)
-# schedule.every().hour.do(email_assistant.generate_blank_excel)
+schedule.every(12).hours.do(email_assistant.send_email_notification)
+schedule.every(12).hours.do(email_assistant.save_report)
+schedule.every(12).hours.do(email_assistant.generate_blank_excel)
 schedule.every(INJECT_TIME_INTERVAL).seconds.do(predictions)
 schedule.every(INJECT_TIME_INTERVAL).seconds.do(anomaly_detection)
 
@@ -307,6 +316,9 @@ email_assistant.generate_blank_excel()
 model_loading()
 # making a first batch of predictions - just to guarantee that the anomaly detection program has indeed predicted data to work with
 predictions()
+
+# just to see if it skips the email sending function
+email_assistant.send_email_notification()
 
 
 # ---------------------------------------------------------------------------------
