@@ -1,9 +1,29 @@
 version: '3'
 
 services:
+  influxdb:
+    image: influxdb:latest
+    restart: on-failure
+    ports:
+      - '8086:8086'
+    env_file:
+      - influx_variables.env
+    volumes:
+      - "./data:/var/lib/influxdb2"
+      - "./config:/etc/influxdb2"
+
+  grafana:
+    image: grafana/grafana-oss
+    restart: on-failure
+    ports:
+      - '3000:3000'
+    depends_on:
+      - influxdb
+    volumes:
+      - "grafana-storage:/var/lib/grafana"
 
   model_training:
-    image: model_training:1.1
+    image: model_training:1.02
     build: ./BuildingModels
     restart: on-failure
     env_file:
@@ -11,10 +31,12 @@ services:
      - settings.env
     volumes:
       - ./BuildingModels:/app
-      - SharedFolder:/app/Models
+      - SharedFolder1:/app/Models
+      - SharedFolder2:/app/Scalers
+      - SharedFolder3:/app/Datasets
 
   assistant:
-    image: assistant:1.1
+    image: assistant:1.02
     build: ./Assistant
     restart: on-failure
     env_file:
@@ -22,10 +44,11 @@ services:
      - settings.env
     volumes:
       - ./Assistant:/app
-      - SharedFolder:/app/Models
+      - SharedFolder1:/app/Models
+      - SharedFolder2:/app/Scalers
 
   sse:
-    image: sse:1.1
+    image: sse:1.01
     build: ./SSE_Client
     restart: on-failure
     env_file:
@@ -35,7 +58,7 @@ services:
       - ./SSE_Client:/app
 
   update_datasets:
-    image: update_datasets:1.1
+    image: update_datasets:1.01
     build: ./UpdateTrainingData
     restart: on-failure
     env_file:
@@ -43,13 +66,38 @@ services:
      - settings.env
     volumes:
       - ./UpdateTrainingData:/app
+      - SharedFolder3:/app/Datasets
 
+  dummy:
+    image: dummy:1.01
+    build: ./Dummy
+    restart: on-failure
+    env_file:  
+      - settings.env
+    volumes:
+      - ./Dummy:/app
 
 volumes:
-  SharedFolder:
+  grafana-storage:
+    external: false
+  influxdb-storage:
+    external: false
+  SharedFolder1:
     driver: local
     driver_opts:
       type: none
       o: bind 
-      device: ./BuildingModels/Models
-
+      device: .\BuildingModels\Models
+  SharedFolder2:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind 
+      device: .\BuildingModels\Scalers
+  SharedFolder3:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind 
+      device: .\UpdateTrainingData\Datasets
+# C:\Users\Lenovo\Desktop\TESE\Trabalho\PROGRAMAÇÃO\Deliverable_D19-3\Models
