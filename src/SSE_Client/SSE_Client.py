@@ -3,7 +3,7 @@ import json
 import influxdb_client
 from influxdb_client.client.write_api import SYNCHRONOUS, ASYNCHRONOUS
 from datetime import datetime
-# from settings import SSE, INFLUXDB
+from settings import SSE, INFLUXDB
 import os
 
 
@@ -12,26 +12,19 @@ import os
 # 1. SETTING SOME FIXED VARIABLES FROM THE DATABASE AND SSE CLIENT
 
 # When using the docker container
-# Database variables
-db_url = os.getenv("INFLUXDB_URL")
-db_org = os.getenv("DOCKER_INFLUXDB_INIT_ORG")
-db_token = os.getenv("DOCKER_INFLUXDB_INIT_ADMIN_TOKEN")
-db_bucket = os.getenv("DOCKER_INFLUXDB_INIT_BUCKET")
+# db_url = "http://localhost:8086"
+# db_org = os.getenv("DOCKER_INFLUXDB_INIT_OR")
+# db_token = os.getenv("DOCKER_INFLUXDB_INIT_ADMIN_TOKEN")
+# db_bucket = os.getenv("DOCKER_INFLUXDB_INIT_BUCKET")
 
-# SSE client variables
-sse_host = str(os.getenv("SSE_HOST"))
-sse_user = str(os.getenv("SSE_USER"))
-sse_pass = str(os.getenv("SSE_PASS"))
-
-
-# # When testing...
-# db_url = INFLUXDB['URL']
-# db_org = INFLUXDB['Org']
-# db_token = INFLUXDB['Token']
-# db_bucket = INFLUXDB['Bucket']
+# When testing...
+db_url = INFLUXDB['URL']
+db_org = INFLUXDB['Org']
+db_token = INFLUXDB['Token']
+db_bucket = INFLUXDB['Bucket']
 
 # SSE variables
-# sse_host, sse_user, sse_pass = SSE['URL'], SSE['Auth']['User'], SSE['Auth']['Pass']
+sse_host, sse_user, sse_pass = SSE['URL'], SSE['Auth']['User'], SSE['Auth']['Pass']
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -59,9 +52,8 @@ def send_values(measurement, equipment, value):
         .tag("DataType", "Real Data") \
         .field("value", value) \
         .time(datetime.utcnow(), influxdb_client.WritePrecision.NS)
-        
     
-    return write_api.write(bucket = str(db_bucket), org = str(db_org), record = to_send) 
+    return write_api.write(bucket = str(db_bucket), record = to_send) 
    
 
 
@@ -91,3 +83,4 @@ for msg in messages:
 
     except:
         print("Incomplete or unsuccessful reading: ", msg, '\n')
+
