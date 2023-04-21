@@ -1,11 +1,6 @@
 import pandas as pd
 import numpy as np
-import tensorflow as tf
 # from settings import TRAIN_SPLIT, PREVIOUS_STEPS, TRAINING, VARIABLES, LIN_REG_VARS, MODEL_DIR, SCALER_DIR, INFLUXDB, DATA_DIR
-import keras_tuner as kt
-from keras_tuner import HyperParameters as hp
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.linear_model import LinearRegression
 import joblib
 import schedule
 import influxdb_client
@@ -13,6 +8,17 @@ from influxdb_client.client.write_api import ASYNCHRONOUS
 import os
 import time
 import json
+
+print('Imported all the non ML libraries \n')
+import tensorflow as tf
+print('Imported the Tensorflow library \n')
+
+import keras_tuner as kt
+from keras_tuner import HyperParameters as hp
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.linear_model import LinearRegression
+print('Imported the remaining ML libraries (keras_tuner + sklearn) \n')
+
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # 1. DEFINING SOME FIXED VARIABLES
@@ -234,30 +240,32 @@ def model_builder():
         input_df.rename(columns = {'Unnamed: 0': 'Date'}, inplace = True)
         # retrieving the variables in which we are interested
         df = input_df[['Date', var_to_predict]]
+        # Smootinhg the real data
+        df['EMA'] = df.loc[:, var_to_predict].ewm(span = 8, adjust = True).mean()
 
         # 5.2. PRE-PROCESS THE DATA
-        # Smoothing the data with the aid of Exponential Moving Average
-        df[var_to_predict] = df.loc[:, var_to_predict].ewm(alpha = 0.35, adjust = True).mean()
         # Normalizing the data
         scaler = MinMaxScaler()
-        df[var_to_predict] = scaler.fit_transform(np.array(df[var_to_predict]).reshape(-1, 1))
+        df[f'{var_to_predict}'] = scaler.fit_transform(np.array(df[var_to_predict]).reshape(-1, 1))
         # Saving the scalers
         joblib.dump(scaler, f'{SCALER_DIR}{var_to_predict}.scale')
 
+        # Smoothing the data with the aid of Exponential Moving Average (in it's normalized state)
+        df['EMA_Normalized'] = df.loc[:, var_to_predict].ewm(span = 8, adjust = True).mean()
+
 
         # 5.3. TRAINING AND TEST SPLITS
-
         # Splitting data between training and testing
         train_data_size = int(TRAIN_SPLIT * len(df)) 
         train_data = df[:train_data_size]
         test_data = df[train_data_size:len(df)]
 
-        # Defining our train and test datasets based on the divide_time_series function
-        train_X, train_y = divide_time_series(x = train_data[var_to_predict],
-                                        y = train_data[var_to_predict],
+        # Defining our train and test datasets based on the previous function
+        train_X, train_y = divide_time_series(x = train_data['EMA_Normalized'],
+                                        y = train_data['EMA_Normalized'],
                                         prev_steps = PREVIOUS_STEPS)
-        test_X, test_y = divide_time_series(x = test_data[var_to_predict],
-                                        y = test_data[var_to_predict],
+        test_X, test_y = divide_time_series(x = test_data['EMA_Normalized'],
+                                        y = test_data['EMA_Normalized'],
                                         prev_steps = PREVIOUS_STEPS)
 
 
@@ -316,8 +324,13 @@ def model_builder():
 
 # schedule.every().tuesday.at("02:00").do(model_builder)
 schedule.every().monday.at("02:00").do(model_builder)
+
+
 # Just to see if the container is properly working
-# model_builder()
+if str(os.getenv("BUILD_ON_START")) == str(True):
+    model_builder()
+else:
+    print('Skipping model building function')
 
 while True:
 
@@ -325,5 +338,5 @@ while True:
 
     print('Model Builder will build the new models at 2 A.M on monday')
 
-    time.sleep(1)
+    time.sleep(3600)
 
