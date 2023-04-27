@@ -1,0 +1,35 @@
+# SSE:
+#   URL: "http://<Insert Ditto_IP>:<Insert Ditto HTTP Port>/api/2/things"
+#   Auth:
+#     User: "ditto"
+#     Pass: "ditto"
+# Database:
+#   URL: "http://influxdb:8086"
+#   Token: "4LUVeBtQqHSMdESwSWjn2YwQYTc3P006cQXKas-dzL_noD9tvLSZ4AfNnyG_EnFzQ1NLiiuMS1sR9lSBrllFAg=="
+#   Org: "augmanity"
+#   Bucket: "test"
+
+SSE:
+  URL: "http://192.168.1.5:31956/api/2/things"
+  Auth:
+    User: "ditto"
+    Pass: "ditto"
+Database:
+  URL: "http://localhost:8086"
+  Token: "bqKaz1mOHKRTJBQq6_ON4qk89U02e99xFc2jBN89M4OMaDOyYMHR7q7DDKR7PPiX7wKCiXC8X_9NbF27-aW7wg=="
+  Org: "UA"
+  Bucket: "ESP_C2E"
+MQTT:
+  Broker: "192.168.1.5"
+  Port : 31883
+  Topic: 
+    Tenant: "augmanity"
+    rest_of_path: "/things/twin/commands/modify"
+
+Logging:
+  General:
+    Name: MAS
+    Level: INFO #FATAL, ERROR, WARNING, INFO, DEBUG
+  Console:
+    Level: DEBUG
+    Format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
